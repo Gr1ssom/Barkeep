@@ -55,20 +55,43 @@ class PDFToFormattedTextConverter(QWidget):
         return text_data
 
     def format_for_bartender(self, text):
-        # Add commas between certain known field patterns
-        text = re.sub(r'(CERTIFICATE OF ANALYSIS)', r'\1,', text)
-        text = re.sub(r'(PRODUCED: \w+ \d{1,2}, \d{4})', r'\1,', text)
-        text = re.sub(r'(SAMPLE: [\w\s\-]+)', r'\1,', text)
-        text = re.sub(r'(BATCH: \w+)', r'\1,', text)
-        text = re.sub(r'(CANNABINOID PROFILE BY UPLC-UV)', r'\1,', text)
-        text = re.sub(r'(TOTAL CBD = \( CBDA X 0\.877 \) \+ CBD)', r'\1,', text)
-        text = re.sub(r'(TOTAL THC = \( THCA X 0\.877 \) \+ THC)', r'\1,', text)
-        text = re.sub(r'(DRY-WEIGHT AMOUNTS SHOWN)', r'\1,', text)
-        text = re.sub(r'(MOISTURE CONTENT BY MOISTURE BALANCE)', r'\1,', text)
-        text = re.sub(r'(WATER ACTIVITY BY HYGROMETER)', r'\1,', text)
-        text = re.sub(r'(PASS)', r'\1,', text)
-        # Add other known field delimiters here as needed
-        return text
+        # Extract important fields and format them as CSV-style output
+
+        # Extracting the fields like Batch Number, Testing Tag, Cannabinoid Results
+        batch_number = re.search(r'BATCH\s+NO\s*:\s*(\d+)', text)
+        testing_tag = re.search(r'METRC\s+SRC\s+TAG\s*:\s*([\w\d]+)', text)
+        total_thc = re.search(r'TOTAL\s+THC\s*=\s*\(\s*THCA\s*X\s*0\.877\s*\)\s*\+\s*THC', text)
+        total_cbd = re.search(r'TOTAL\s+CBD\s*=\s*\(\s*CBDA\s*X\s*0\.877\s*\)\s*\+\s*CBD', text)
+
+        # Test results by analytes (just an example for structure)
+        analyte_results = re.findall(r'(\w+)\s*(PASS|FAIL)', text)
+
+        # Start formatting the output
+        formatted_data = []
+        
+        # Add headers first
+        formatted_data.append("Batch Number, Testing Tag, Total THC, Total CBD, Analyte, Result")
+
+        # Add batch number and testing tag
+        if batch_number and testing_tag:
+            formatted_data.append(f"{batch_number.group(1)}, {testing_tag.group(1)}, ")
+
+        # Add cannabinoid profile data (THC, CBD)
+        if total_thc:
+            formatted_data[-1] += f"{total_thc.group(0)}, "
+        else:
+            formatted_data[-1] += "N/A, "
+        
+        if total_cbd:
+            formatted_data[-1] += f"{total_cbd.group(0)}, "
+        else:
+            formatted_data[-1] += "N/A, "
+
+        # Add test results (e.g., Pass/Fail for each analyte)
+        for analyte, result in analyte_results:
+            formatted_data.append(f", , , , {analyte}, {result}")
+
+        return "\n".join(formatted_data)
 
     def convert_to_formatted_text(self):
         # Extract data from PDF
