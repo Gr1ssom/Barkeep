@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class MetrcAPI:
-    BASE_URL = "https://api-missouri.metrc.com"
+    BASE_URL = "https://api-mo.metrc.com"
 
     def __init__(self):
         self.vendor_api_key = os.getenv("VENDOR_API_KEY")
@@ -23,15 +23,52 @@ class MetrcAPI:
 
     def get_active_packages(self, license_number):
         """Retrieve active packages for a given license."""
-        url = f"{self.BASE_URL}/packages/v1/active"
+        url = f"{self.BASE_URL}/packages/v2/active"
         params = {"licenseNumber": license_number}
         response = requests.get(url, headers=self.auth_header, params=params)
-        response.raise_for_status()
-        return response.json()
+        
+        # Print raw response for debugging
+        print("Raw API Response:", response.text)
+        
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise ValueError(f"HTTP Error: {e}")
+
+        try:
+            data = response.json()
+        except ValueError:
+            raise ValueError("Invalid JSON response from API.")
+
+        # Check for errors in the response
+        if isinstance(data, dict) and "error" in data:
+            raise ValueError(f"API Error: {data['error']}")
+
+        if not isinstance(data, list):
+            raise ValueError("Unexpected API response format. Expected a list.")
+
+        return data
 
     def get_testing_results(self, package_id):
         """Retrieve testing results for a specific package."""
-        url = f"{self.BASE_URL}/packages/v1/{package_id}/labtests"
+        url = f"{self.BASE_URL}/packages/v2/{package_id}/labtests"
         response = requests.get(url, headers=self.auth_header)
-        response.raise_for_status()
-        return response.json()
+        
+        # Print raw response for debugging
+        print("Testing Results API Response:", response.text)
+        
+        try:
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise ValueError(f"HTTP Error: {e}")
+
+        try:
+            data = response.json()
+        except ValueError:
+            raise ValueError("Invalid JSON response from API.")
+
+        # Check for errors in the response
+        if isinstance(data, dict) and "error" in data:
+            raise ValueError(f"API Error: {data['error']}")
+
+        return data
