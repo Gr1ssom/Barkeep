@@ -53,6 +53,10 @@ class MetrcAPI:
     def get_lab_test_results(self, package_id, license_number):
         url = f"{self.BASE_URL}/labtests/v2/results"
         params = {"packageId": package_id, "licenseNumber": license_number}
+
+        # Log the request details for debugging
+        logging.debug(f"Fetching lab test results with params: {params}")
+
         return self._make_request(url, params)
 
     def _make_request(self, url, params):
@@ -60,6 +64,11 @@ class MetrcAPI:
             response = requests.get(url, headers=self.auth_header, params=params)
             response.raise_for_status()
             return response.json()
+        except requests.exceptions.HTTPError as e:
+            # Log response content for detailed debugging
+            error_message = f"HTTP Error: {e}\nResponse: {response.text if response else 'No response body'}"
+            logging.error(error_message)
+            raise ValueError(error_message)
         except requests.exceptions.RequestException as e:
             error_message = f"Request error: {str(e)}"
             logging.error(error_message)
