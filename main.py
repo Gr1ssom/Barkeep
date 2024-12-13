@@ -1,9 +1,14 @@
 import sys
+import logging
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QVBoxLayout, QWidget, QComboBox,
     QLineEdit, QPushButton, QTableWidget, QTableWidgetItem, QLabel, QHBoxLayout, QMessageBox
 )
 from metrc_api import MetrcAPI
+
+# Configure logging to log errors to output.txt
+logging.basicConfig(filename='output.txt', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class MetrcApp(QMainWindow):
     def __init__(self):
@@ -18,20 +23,24 @@ class MetrcApp(QMainWindow):
         top_layout = QHBoxLayout()
         main_widget = QWidget()
 
+        # License selection
         self.license_dropdown = QComboBox()
-        self.license_dropdown.addItems(["CUL000032", "MAN000035"])  # Add license options
+        self.license_dropdown.addItems(["CUL000032", "MAN000035"])
         top_layout.addWidget(QLabel("Select License:"))
         top_layout.addWidget(self.license_dropdown)
 
-        self.package_id_input = QLineEdit()
-        self.package_id_input.setPlaceholderText("Enter partial package ID")
-        top_layout.addWidget(QLabel("Package ID:"))
-        top_layout.addWidget(self.package_id_input)
+        # Tag entry field
+        self.tag_input = QLineEdit()
+        self.tag_input.setPlaceholderText("Enter partial tag (e.g., 23559 or 28331)")
+        top_layout.addWidget(QLabel("Tag:"))
+        top_layout.addWidget(self.tag_input)
 
+        # Search button
         self.search_button = QPushButton("Search")
         self.search_button.clicked.connect(self.search_lab_test_results)
         top_layout.addWidget(self.search_button)
 
+        # Results table
         self.results_table = QTableWidget()
         self.results_table.setColumnCount(4)
         self.results_table.setHorizontalHeaderLabels(["Test Name", "Result", "Date", "Notes"])
@@ -42,49 +51,31 @@ class MetrcApp(QMainWindow):
         self.setCentralWidget(main_widget)
 
     def search_lab_test_results(self):
-        package_id = self.package_id_input.text().strip()
+        tag_input = self.tag_input.text().strip()
         license_number = self.license_dropdown.currentText()
 
-        if not package_id:
-            self.show_error("Package ID input is empty. Please enter a partial or full package ID.")
+        if not tag_input:
+            self.show_error("Tag input is empty. Please enter a partial tag.")
             return
 
         try:
-            # Fetch active packages
-            active_packages = self.metrc_api.get_active_packages(license_number)
-
-            # Debugging: Print all packages
-            print(f"All Active Packages: {active_packages}")
-
-            # Filter packages matching the partial package ID
-            matching_packages = [
-                pkg for pkg in active_packages if package_id in pkg.get("Label", "")
-            ]
+            # Fetch active packages filtered by partial tag and LabTestingState
+            matching_packages = self.metrc_api.get_active_packages(license_number, partial_tag=tag_input)
 
             if not matching_packages:
-                self.show_error("No matching packages found.")
+                self.show_error("No packages with 'TestPassed' state found matching the given tag.")
                 return
 
-            # Debugging: Print matching packages
-            print(f"Matching Packages: {matching_packages}")
+            # Use the first matching package to fetch its lab test results
+            selected_package = matching_packages[0]["Label"]
+            test_results = self.metrc_api.get_lab_test_results(selected_package, license_number)
 
-            # Ensure the package has lab testing data
-            valid_packages = [
-                pkg for pkg in matching_packages if pkg.get("LabTestingState") in ("Submitted", "Tested")
-            ]
-
-            if not valid_packages:
-                self.show_error("No valid lab test results available for the matching packages.")
-                return
-
-            # Use the first valid package to fetch its lab test results
-            first_match = valid_packages[0]["Label"]
-            test_results = self.metrc_api.get_lab_test_results(first_match, license_number)
-
-            # Display results in the table
+            # Display the test results in the table
             self.display_results(test_results)
         except ValueError as e:
-            self.show_error(str(e))
+            error_message = str(e)
+            self.log_error(error_message)
+            self.show_error(error_message)
 
     def display_results(self, test_results):
         self.results_table.setRowCount(0)
@@ -98,6 +89,10 @@ class MetrcApp(QMainWindow):
 
     def show_error(self, message):
         QMessageBox.critical(self, "Error", message)
+
+    def log_error(self, message):
+        logging.error(message)
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

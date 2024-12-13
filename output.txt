@@ -1,0 +1,2 @@
+2024-12-12 19:13:28,827 - ERROR - Request error: 400 Client Error: Bad Request for url: https://api-mo.metrc.com/labtests/v2/results?packageId=1A40C030000332D000028331&licenseNumber=CUL000032
+2024-12-12 19:13:28,827 - ERROR - Request error: 400 Client Error: Bad Request for url: https://api-mo.metrc.com/labtests/v2/results?packageId=1A40C030000332D000028331&licenseNumber=CUL000032

@@ -7,8 +7,9 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-# Configure logging
-logging.basicConfig(filename='metrc_debug.log', level=logging.DEBUG)
+# Configure logging to log errors to output.txt
+logging.basicConfig(filename='output.txt', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+
 
 class MetrcAPI:
     BASE_URL = "https://api-mo.metrc.com"
@@ -29,40 +30,37 @@ class MetrcAPI:
             "Accept": "application/json"
         }
 
-    def get_active_packages(self, license_number):
+    def get_active_packages(self, license_number, partial_tag=None):
         url = f"{self.BASE_URL}/packages/v2/active"
         params = {"licenseNumber": license_number}
         response = self._make_request(url, params)
 
-        # Debugging: Log raw response structure
-        logging.debug(f"Raw Active Packages Response: {response}")
-
-        # Extract the 'Data' field, which contains the list of active packages
+        # Validate response and filter packages locally
         if isinstance(response, dict) and "Data" in response:
-            return response["Data"]
+            active_packages = response["Data"]
 
-        raise ValueError("Unexpected response format: 'Data' field missing.")
+            # Filter by LabTestingState and partial tag
+            filtered_packages = [
+                pkg for pkg in active_packages
+                if pkg.get("LabTestingState") == "TestPassed" and (partial_tag in pkg.get("Label", ""))
+            ]
+
+            logging.debug(f"Filtered packages: {filtered_packages}")
+            return filtered_packages
+
+        raise ValueError("Unexpected response format: 'Data' field missing or invalid.")
 
     def get_lab_test_results(self, package_id, license_number):
         url = f"{self.BASE_URL}/labtests/v2/results"
         params = {"packageId": package_id, "licenseNumber": license_number}
-
-        # Debugging: Log package and license info
-        logging.debug(f"Fetching lab test results for packageId: {package_id}, licenseNumber: {license_number}")
-
         return self._make_request(url, params)
 
     def _make_request(self, url, params):
         try:
-            # Debugging: Log request details
-            logging.debug(f"Making API request to: {url} with params: {params}")
-
             response = requests.get(url, headers=self.auth_header, params=params)
             response.raise_for_status()
-            return response.json()  # Always parse as JSON
-        except requests.exceptions.HTTPError as e:
-            # Debugging: Log response content on error
-            logging.error(f"HTTP Error: {e}, Response Content: {response.text}")
-            raise ValueError(f"HTTP Error: {e}")
-        except ValueError:
-            raise ValueError("Invalid JSON response from API.")
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            error_message = f"Request error: {str(e)}"
+            logging.error(error_message)
+            raise ValueError(error_message)
