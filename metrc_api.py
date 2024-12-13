@@ -1,75 +1,118 @@
 import os
 import requests
-import base64
 import logging
+from logging.handlers import RotatingFileHandler
+from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
 
-# Load environment variables
+# Load environment variables from .env
 load_dotenv()
 
-# Configure logging to log errors to output.txt
-logging.basicConfig(filename='output.txt', level=logging.ERROR, format='%(asctime)s - %(levelname)s - %(message)s')
+# Set up logging to a file called debug.log with rotation
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
+handler = RotatingFileHandler("debug.log", maxBytes=5*1024*1024, backupCount=2)  # 5MB per file
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+handler.setFormatter(formatter)
+logger.addHandler(handler)
 
-class MetrcAPI:
-    BASE_URL = "https://api-mo.metrc.com"
+API_BASE = "https://api-mo.metrc.com"
 
-    def __init__(self):
-        self.vendor_api_key = os.getenv("VENDOR_API_KEY")
-        self.user_api_key = os.getenv("USER_API_KEY")
-        if not self.vendor_api_key or not self.user_api_key:
-            raise ValueError("API keys are missing. Ensure they are set in the .env file.")
-        self.auth_header = self.get_auth_header()
+API_KEY = os.getenv("VENDOR_API_KEY")
+USER_KEY = os.getenv("USER_API_KEY")
 
-    def get_auth_header(self):
-        credentials = f"{self.vendor_api_key}:{self.user_api_key}"
-        encoded_credentials = base64.b64encode(credentials.encode("utf-8")).decode("utf-8")
-        return {
-            "Authorization": f"Basic {encoded_credentials}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
+# Prefixes used to construct full package labels from partial tags
+PREFIXES = {
+    "MAN000035": "1A40C03000043950000",
+    "CUL000032": "1A40C030000332D0000"
+}
 
-    def get_active_packages(self, license_number, partial_tag=None):
-        url = f"{self.BASE_URL}/packages/v2/active"
-        params = {"licenseNumber": license_number}
-        response = self._make_request(url, params)
+def get_package_id(license_code: str, full_label: str):
+    """
+    Given a license code and a full package label, retrieve the package details 
+    from Metrc and return the packageId (numeric ID).
+    Endpoint: GET /packages/v2/{packageLabel}?licenseNumber={licenseNumber}
+    """
+    endpoint = f"{API_BASE}/packages/v2/{full_label}?licenseNumber={license_code}"
+    logging.info("Requesting package details from: %s", endpoint)
 
-        # Validate response and filter packages locally
-        if isinstance(response, dict) and "Data" in response:
-            active_packages = response["Data"]
+    try:
+        response = requests.get(endpoint, auth=HTTPBasicAuth(API_KEY, USER_KEY))
+    except requests.RequestException as e:
+        logging.exception("Network error while contacting Metrc API for package details: %s", e)
+        return None
 
-            # Filter by LabTestingState and partial tag
-            filtered_packages = [
-                pkg for pkg in active_packages
-                if pkg.get("LabTestingState") == "TestPassed" and (partial_tag in pkg.get("Label", ""))
-            ]
-
-            logging.debug(f"Filtered packages: {filtered_packages}")
-            return filtered_packages
-
-        raise ValueError("Unexpected response format: 'Data' field missing or invalid.")
-
-    def get_lab_test_results(self, package_id, license_number):
-        url = f"{self.BASE_URL}/labtests/v2/results"
-        params = {"packageId": package_id, "licenseNumber": license_number}
-
-        # Log the request details for debugging
-        logging.debug(f"Fetching lab test results with params: {params}")
-
-        return self._make_request(url, params)
-
-    def _make_request(self, url, params):
+    if response.status_code == 200:
+        logging.debug("Successful response received for packageLabel=%s", full_label)
         try:
-            response = requests.get(url, headers=self.auth_header, params=params)
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.HTTPError as e:
-            # Log response content for detailed debugging
-            error_message = f"HTTP Error: {e}\nResponse: {response.text if response else 'No response body'}"
-            logging.error(error_message)
-            raise ValueError(error_message)
-        except requests.exceptions.RequestException as e:
-            error_message = f"Request error: {str(e)}"
-            logging.error(error_message)
-            raise ValueError(error_message)
+            package_data = response.json()
+            logging.debug("Package Data JSON: %s", package_data)  # Log the raw JSON
+
+            # Extract packageId
+            if isinstance(package_data, dict):
+                package_id = package_data.get("Id")
+                if package_id:
+                    logging.debug("Found packageId=%s for label=%s", package_id, full_label)
+                    return package_id
+                else:
+                    logging.error("packageId not found in the response for label=%s", full_label)
+                    return None
+            else:
+                logging.error("Unexpected JSON structure for package details: %s", package_data)
+                return None
+        except ValueError:
+            logging.error("Invalid JSON response for packageLabel=%s: %s", full_label, response.text)
+            return None
+    else:
+        logging.error(
+            "Error %d from Metrc API for packageLabel=%s: %s", 
+            response.status_code, full_label, response.text
+        )
+        return None
+
+def get_test_results(license_code: str, package_id: int, page_number=1, page_size=10):
+    """
+    Given a license code and a packageId, retrieve the lab test results from Metrc.
+    Endpoint: GET /labtests/v2/results?licenseNumber={licenseNumber}&packageId={packageId}&pageNumber={pageNumber}&pageSize={pageSize}
+    Returns:
+        A list of test result dicts or None if an error occurred.
+    """
+    endpoint = (
+        f"{API_BASE}/labtests/v2/results?"
+        f"licenseNumber={license_code}&"
+        f"packageId={package_id}&"
+        f"pageNumber={page_number}&"
+        f"pageSize={page_size}"
+    )
+    logging.info("Requesting test results from: %s", endpoint)
+
+    try:
+        response = requests.get(endpoint, auth=HTTPBasicAuth(API_KEY, USER_KEY))
+    except requests.RequestException as e:
+        logging.exception("Network error while contacting Metrc API for test results: %s", e)
+        return None
+
+    if response.status_code == 200:
+        logging.debug("Successful response received for packageId=%s", package_id)
+        try:
+            test_results = response.json()
+            logging.debug("Test Results JSON: %s", test_results)  # Log the raw JSON
+
+            # Extract the list of test results from the "Data" key
+            if isinstance(test_results, dict) and "Data" in test_results:
+                return test_results["Data"]
+            elif isinstance(test_results, list):
+                return test_results
+            else:
+                logging.error("Unexpected JSON structure for test results: %s", test_results)
+                return None
+        except ValueError:
+            logging.error("Invalid JSON response for packageId=%s: %s", package_id, response.text)
+            return None
+    else:
+        logging.error(
+            "Error %d from Metrc API for packageId=%s: %s", 
+            response.status_code, package_id, response.text
+        )
+        return None
