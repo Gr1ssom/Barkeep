@@ -4,6 +4,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
+import time
 
 # Load environment variables from .env
 load_dotenv()
@@ -16,6 +17,13 @@ handler = RotatingFileHandler("debug.log", maxBytes=5*1024*1024, backupCount=2) 
 formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
 handler.setFormatter(formatter)
 logger.addHandler(handler)
+
+# Also log to console for real-time debugging
+console_handler = logging.StreamHandler()
+console_handler.setLevel(logging.INFO)
+console_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
+console_handler.setFormatter(console_formatter)
+logger.addHandler(console_handler)
 
 API_BASE = "https://api-mo.metrc.com"
 
@@ -30,9 +38,7 @@ PREFIXES = {
 
 def get_package_id(license_code: str, full_label: str):
     """
-    Given a license code and a full package label, retrieve the package details 
-    from Metrc and return the packageId (numeric ID).
-    Endpoint: GET /packages/v2/{packageLabel}?licenseNumber={licenseNumber}
+    Retrieve the packageId for a given package label and license number.
     """
     endpoint = f"{API_BASE}/packages/v2/{full_label}?licenseNumber={license_code}"
     logging.info("Requesting package details from: %s", endpoint)
@@ -41,78 +47,105 @@ def get_package_id(license_code: str, full_label: str):
         response = requests.get(endpoint, auth=HTTPBasicAuth(API_KEY, USER_KEY))
     except requests.RequestException as e:
         logging.exception("Network error while contacting Metrc API for package details: %s", e)
-        return None
+        return {"success": False, "error": "Network error"}
 
     if response.status_code == 200:
         logging.debug("Successful response received for packageLabel=%s", full_label)
         try:
             package_data = response.json()
-            logging.debug("Package Data JSON: %s", package_data)  # Log the raw JSON
-
-            # Extract packageId
+            logging.debug("Package Data JSON: %s", package_data)
             if isinstance(package_data, dict):
                 package_id = package_data.get("Id")
                 if package_id:
                     logging.debug("Found packageId=%s for label=%s", package_id, full_label)
-                    return package_id
+                    return {"success": True, "package_id": package_id}
                 else:
                     logging.error("packageId not found in the response for label=%s", full_label)
-                    return None
+                    return {"success": False, "error": "packageId not found"}
             else:
                 logging.error("Unexpected JSON structure for package details: %s", package_data)
-                return None
+                return {"success": False, "error": "Unexpected JSON structure"}
         except ValueError:
             logging.error("Invalid JSON response for packageLabel=%s: %s", full_label, response.text)
-            return None
+            return {"success": False, "error": "Invalid JSON response"}
+    elif response.status_code == 401:
+        logging.error("Unauthorized access for packageLabel=%s. Check API credentials and permissions.", full_label)
+        return {"success": False, "error": "Unauthorized"}
     else:
         logging.error(
             "Error %d from Metrc API for packageLabel=%s: %s", 
             response.status_code, full_label, response.text
         )
-        return None
+        return {"success": False, "error": f"HTTP {response.status_code}"}
 
-def get_test_results(license_code: str, package_id: int, page_number=1, page_size=10):
+def get_test_results(license_code: str, package_id: int, page_size=20):
     """
-    Given a license code and a packageId, retrieve the lab test results from Metrc.
-    Endpoint: GET /labtests/v2/results?licenseNumber={licenseNumber}&packageId={packageId}&pageNumber={pageNumber}&pageSize={pageSize}
-    Returns:
-        A list of test result dicts or None if an error occurred.
+    Retrieve all lab test results for a given packageId and license number by handling pagination.
     """
-    endpoint = (
-        f"{API_BASE}/labtests/v2/results?"
-        f"licenseNumber={license_code}&"
-        f"packageId={package_id}&"
-        f"pageNumber={page_number}&"
-        f"pageSize={page_size}"
-    )
-    logging.info("Requesting test results from: %s", endpoint)
+    all_test_results = []
+    page_number = 1
+    total_pages = 1  # Initialize with 1 to enter the loop
 
-    try:
-        response = requests.get(endpoint, auth=HTTPBasicAuth(API_KEY, USER_KEY))
-    except requests.RequestException as e:
-        logging.exception("Network error while contacting Metrc API for test results: %s", e)
-        return None
-
-    if response.status_code == 200:
-        logging.debug("Successful response received for packageId=%s", package_id)
-        try:
-            test_results = response.json()
-            logging.debug("Test Results JSON: %s", test_results)  # Log the raw JSON
-
-            # Extract the list of test results from the "Data" key
-            if isinstance(test_results, dict) and "Data" in test_results:
-                return test_results["Data"]
-            elif isinstance(test_results, list):
-                return test_results
-            else:
-                logging.error("Unexpected JSON structure for test results: %s", test_results)
-                return None
-        except ValueError:
-            logging.error("Invalid JSON response for packageId=%s: %s", package_id, response.text)
-            return None
-    else:
-        logging.error(
-            "Error %d from Metrc API for packageId=%s: %s", 
-            response.status_code, package_id, response.text
+    while page_number <= total_pages:
+        endpoint = (
+            f"{API_BASE}/labtests/v2/results?"
+            f"licenseNumber={license_code}&"
+            f"packageId={package_id}&"
+            f"pageNumber={page_number}&"
+            f"pageSize={page_size}"
         )
-        return None
+        logging.info("Requesting test results from: %s", endpoint)
+
+        try:
+            response = requests.get(endpoint, auth=HTTPBasicAuth(API_KEY, USER_KEY))
+        except requests.RequestException as e:
+            logging.exception("Network error while contacting Metrc API for test results: %s", e)
+            return {"success": False, "error": "Network error"}
+
+        if response.status_code == 200:
+            logging.debug("Successful response received for packageId=%s on page %s", package_id, page_number)
+            try:
+                test_results = response.json()
+                logging.debug("Test Results JSON: %s", test_results)
+                if isinstance(test_results, dict) and "Data" in test_results:
+                    data = test_results["Data"]
+                    all_test_results.extend(data)
+                    total_records = test_results.get("TotalRecords", 0)
+                    page_size_resp = test_results.get("PageSize", page_size)
+                    total_pages = test_results.get("TotalPages", 1)
+                    logging.debug("Fetched page %s/%s with %s records.", page_number, total_pages, len(data))
+                elif isinstance(test_results, list):
+                    # Fallback in case API returns a list directly
+                    all_test_results.extend(test_results)
+                    total_pages = 1  # Assume single page if list is returned
+                else:
+                    logging.error("Unexpected JSON structure for test results: %s", test_results)
+                    return {"success": False, "error": "Unexpected JSON structure"}
+            except ValueError:
+                logging.error("Invalid JSON response for packageId=%s: %s", package_id, response.text)
+                return {"success": False, "error": "Invalid JSON response"}
+        elif response.status_code == 401:
+            logging.error("Unauthorized access for packageId=%s. Check API credentials and permissions.", package_id)
+            return {"success": False, "error": "Unauthorized"}
+        elif response.status_code == 400:
+            # Handle bad request, possibly due to invalid parameters
+            logging.error(
+                "Error %d from Metrc API for packageId=%s: %s", 
+                response.status_code, package_id, response.text
+            )
+            return {"success": False, "error": response.text}
+        else:
+            logging.error(
+                "Error %d from Metrc API for packageId=%s: %s", 
+                response.status_code, package_id, response.text
+            )
+            return {"success": False, "error": f"HTTP {response.status_code}"}
+        
+        # Increment page number for next iteration
+        page_number += 1
+
+        # Optional: Handle rate limiting by introducing a short delay
+        time.sleep(0.2)  # 200 milliseconds
+
+    logging.info("Total test results fetched: %s", len(all_test_results))
+    return {"success": True, "data": all_test_results}
