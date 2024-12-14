@@ -4,7 +4,6 @@ import logging
 from logging.handlers import RotatingFileHandler
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
-import time
 
 # Load environment variables from .env
 load_dotenv()
@@ -103,21 +102,18 @@ def get_test_results(license_code: str, package_id: int, page_size=20):
             return {"success": False, "error": "Network error"}
 
         if response.status_code == 200:
-            logging.debug("Successful response received for packageId=%s on page %s", package_id, page_number)
+            logging.debug("Successful response for packageId=%s on page %s", package_id, page_number)
             try:
                 test_results = response.json()
                 logging.debug("Test Results JSON: %s", test_results)
                 if isinstance(test_results, dict) and "Data" in test_results:
                     data = test_results["Data"]
                     all_test_results.extend(data)
-                    total_records = test_results.get("TotalRecords", 0)
-                    page_size_resp = test_results.get("PageSize", page_size)
                     total_pages = test_results.get("TotalPages", 1)
-                    logging.debug("Fetched page %s/%s with %s records.", page_number, total_pages, len(data))
                 elif isinstance(test_results, list):
-                    # Fallback in case API returns a list directly
+                    # Fallback if API returns a list directly
                     all_test_results.extend(test_results)
-                    total_pages = 1  # Assume single page if list is returned
+                    total_pages = 1
                 else:
                     logging.error("Unexpected JSON structure for test results: %s", test_results)
                     return {"success": False, "error": "Unexpected JSON structure"}
@@ -125,14 +121,10 @@ def get_test_results(license_code: str, package_id: int, page_size=20):
                 logging.error("Invalid JSON response for packageId=%s: %s", package_id, response.text)
                 return {"success": False, "error": "Invalid JSON response"}
         elif response.status_code == 401:
-            logging.error("Unauthorized access for packageId=%s. Check API credentials and permissions.", package_id)
+            logging.error("Unauthorized access for packageId=%s.", package_id)
             return {"success": False, "error": "Unauthorized"}
         elif response.status_code == 400:
-            # Handle bad request, possibly due to invalid parameters
-            logging.error(
-                "Error %d from Metrc API for packageId=%s: %s", 
-                response.status_code, package_id, response.text
-            )
+            logging.error("Bad request for packageId=%s: %s", package_id, response.text)
             return {"success": False, "error": response.text}
         else:
             logging.error(
@@ -141,11 +133,7 @@ def get_test_results(license_code: str, package_id: int, page_size=20):
             )
             return {"success": False, "error": f"HTTP {response.status_code}"}
         
-        # Increment page number for next iteration
         page_number += 1
-
-        # Optional: Handle rate limiting by introducing a short delay
-        time.sleep(0.2)  # 200 milliseconds
 
     logging.info("Total test results fetched: %s", len(all_test_results))
     return {"success": True, "data": all_test_results}
