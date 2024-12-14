@@ -17,7 +17,7 @@ formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-
 handler.setFormatter(formatter)
 logger.addHandler(handler)
 
-# Also log to console for real-time debugging
+# Also log to console
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 console_formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%Y-%m-%d %H:%M:%S")
@@ -29,16 +29,12 @@ API_BASE = "https://api-mo.metrc.com"
 API_KEY = os.getenv("VENDOR_API_KEY")
 USER_KEY = os.getenv("USER_API_KEY")
 
-# Prefixes used to construct full package labels from partial tags
 PREFIXES = {
     "MAN000035": "1A40C03000043950000",
     "CUL000032": "1A40C030000332D0000"
 }
 
 def get_package_id(license_code: str, full_label: str):
-    """
-    Retrieve the packageId for a given package label and license number.
-    """
     endpoint = f"{API_BASE}/packages/v2/{full_label}?licenseNumber={license_code}"
     logging.info("Requesting package details from: %s", endpoint)
 
@@ -55,9 +51,22 @@ def get_package_id(license_code: str, full_label: str):
             logging.debug("Package Data JSON: %s", package_data)
             if isinstance(package_data, dict):
                 package_id = package_data.get("Id")
+                product_name = package_data.get("Item", {}).get("Name", "") or full_label
+                source_package_label = package_data.get("SourcePackageLabel", "")
+                source_package_id = package_data.get("SourcePackageId")
+
+                # If we have a source package id but no label, fetch it
+                if not source_package_label and source_package_id:
+                    source_package_label = get_source_package_label(license_code, source_package_id)
+
                 if package_id:
                     logging.debug("Found packageId=%s for label=%s", package_id, full_label)
-                    return {"success": True, "package_id": package_id}
+                    return {
+                        "success": True,
+                        "package_id": package_id,
+                        "product_name": product_name,
+                        "source_package_label": source_package_label or "N/A"
+                    }
                 else:
                     logging.error("packageId not found in the response for label=%s", full_label)
                     return {"success": False, "error": "packageId not found"}
@@ -68,7 +77,7 @@ def get_package_id(license_code: str, full_label: str):
             logging.error("Invalid JSON response for packageLabel=%s: %s", full_label, response.text)
             return {"success": False, "error": "Invalid JSON response"}
     elif response.status_code == 401:
-        logging.error("Unauthorized access for packageLabel=%s. Check API credentials and permissions.", full_label)
+        logging.error("Unauthorized access for packageLabel=%s. Check API credentials.", full_label)
         return {"success": False, "error": "Unauthorized"}
     else:
         logging.error(
@@ -77,13 +86,31 @@ def get_package_id(license_code: str, full_label: str):
         )
         return {"success": False, "error": f"HTTP {response.status_code}"}
 
+def get_source_package_label(license_code: str, source_package_id: int):
+    endpoint = f"{API_BASE}/packages/v2/{source_package_id}?licenseNumber={license_code}"
+    logging.info("Requesting source package details from: %s", endpoint)
+
+    try:
+        response = requests.get(endpoint, auth=HTTPBasicAuth(API_KEY, USER_KEY))
+    except requests.RequestException as e:
+        logging.exception("Network error while contacting Metrc API for source package details: %s", e)
+        return "N/A"
+
+    if response.status_code == 200:
+        try:
+            data = response.json()
+            return data.get("Label", "N/A")
+        except ValueError:
+            logging.error("Invalid JSON when fetching source package: %s", response.text)
+            return "N/A"
+    else:
+        logging.error("Failed to fetch source package details (HTTP %d): %s", response.status_code, response.text)
+        return "N/A"
+
 def get_test_results(license_code: str, package_id: int, page_size=20):
-    """
-    Retrieve all lab test results for a given packageId and license number by handling pagination.
-    """
     all_test_results = []
     page_number = 1
-    total_pages = 1  # Initialize with 1 to enter the loop
+    total_pages = 1
 
     while page_number <= total_pages:
         endpoint = (
@@ -102,16 +129,13 @@ def get_test_results(license_code: str, package_id: int, page_size=20):
             return {"success": False, "error": "Network error"}
 
         if response.status_code == 200:
-            logging.debug("Successful response for packageId=%s on page %s", package_id, page_number)
             try:
                 test_results = response.json()
-                logging.debug("Test Results JSON: %s", test_results)
                 if isinstance(test_results, dict) and "Data" in test_results:
                     data = test_results["Data"]
                     all_test_results.extend(data)
                     total_pages = test_results.get("TotalPages", 1)
                 elif isinstance(test_results, list):
-                    # Fallback if API returns a list directly
                     all_test_results.extend(test_results)
                     total_pages = 1
                 else:
