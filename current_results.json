@@ -1,0 +1,58 @@
+{
+    "ApprovalNumber": "M00001676832",
+    "ProductDescription": "Robust Infused Pre Roll - 2pk - 0.5g California",
+    "StrainName": "Raisins",
+    "ProductName": "M00001676832: Robust Infused Pre Roll - 2pk - 0.5g California Raisins",
+    "FullPackageTag": "1A40C0300004395000021145",
+    "LicenseSelected": "MAN000035",
+    "Cannabinoids": {
+        "Δ9-THC": "0.0",
+        "THCA": "0.0",
+        "CBD": "0.0",
+        "CBDA": "0.0",
+        "CBN": "0.0",
+        "THCV": "0.0",
+        "CBDV": "0.0",
+        "Δ8-THC": "0.0"
+    },
+    "TestDate": "2024-12-15",
+    "ExpirationDate": "12/15/2025",
+    "SourcePackage": "N/A",
+    "UnitWeight": "1g",
+    "NumLabels": 1,
+    "TestingFacility": "TES000011",
+    "Terpenes": [
+        {
+            "Name": "Beta-Caryophyllene",
+            "Concentration": "1.622%"
+        },
+        {
+            "Name": "Beta-Myrcene",
+            "Concentration": "0.5324%"
+        },
+        {
+            "Name": "Limonene",
+            "Concentration": "0.491%"
+        },
+        {
+            "Name": "Alpha-Humulene",
+            "Concentration": "0.3174%"
+        },
+        {
+            "Name": "Nerolidol",
+            "Concentration": "0.3105%"
+        },
+        {
+            "Name": "Linalool",
+            "Concentration": "0.2143%"
+        },
+        {
+            "Name": "Beta-Pinene",
+            "Concentration": "0.0379%"
+        },
+        {
+            "Name": "Alpha-Pinene",
+            "Concentration": "0.0336%"
+        }
+    ]
+}
